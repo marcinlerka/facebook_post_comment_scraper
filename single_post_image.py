@@ -13,6 +13,9 @@ GRAPHQL_URL = "https://www.facebook.com/api/graphql/"
 PROXY = os.getenv('PROXY')
 PROXIES = {'http': PROXY, 'https': PROXY} if PROXY else None
 
+# FB_DTSG token (set by UI when provided)
+FB_DTSG = ""
+
 # ======================================
 # 🔥 FILL THESE FROM BROWSER SESSION
 # ======================================
@@ -29,7 +32,12 @@ HEADERS = {
 # BUILD PAYLOAD
 # ======================================
 
-def build_payload(node_id, post_id):
+def build_payload(node_id, post_id, cookies=None):
+    # Extract user ID from cookies if available
+    user_id = "0"
+    if cookies and "c_user" in cookies:
+        user_id = cookies["c_user"]
+    
     variables = {
         "isMediaset": True,
         "renderLocation": "comet_media_viewer",
@@ -45,9 +53,10 @@ def build_payload(node_id, post_id):
     }
 
     return {
-        "av": "0",
-        "__user": "0",
+        "av": user_id,
+        "__user": user_id,
         "__a": "1",
+        "fb_dtsg": FB_DTSG if FB_DTSG else "",
          "doc_id": DOC_ID,
         "variables": json.dumps(variables)
     }

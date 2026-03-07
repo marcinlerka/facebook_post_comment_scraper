@@ -20,7 +20,7 @@ def retry_request(url, headers, data, proxies, max_retries=5):
     """Make a POST request with retry logic"""
     for attempt in range(1, max_retries + 1):
         try:
-            r = requests.post(url, headers=headers, data=data, proxies=proxies, timeout=30)
+            r = requests.post(url, headers=headers, data=data, proxies=proxies, cookies=COOKIES, timeout=30)
             if r.status_code == 200:
                 return r
             print(f"  ⚠️ Attempt {attempt}/{max_retries}: Status {r.status_code}")
@@ -110,15 +110,16 @@ def fetch_remaining_images(last_media_id, post_id, current_image_count, save_dir
         }
         
         payload = {
-            "av": "0",
-            "__user": "0",
+            "av": COOKIES.get("c_user", "0"),
+            "__user": COOKIES.get("c_user", "0"),
             "__a": "1",
+            "fb_dtsg": FB_DTSG if FB_DTSG else "",
             "doc_id": DOC_ID_PHOTO,
             "variables": json.dumps(variables)
         }
         
         try:
-            r = requests.post(GRAPHQL_URL, headers=HEADERS_PHOTO, data=payload, proxies=PROXIES, timeout=30)
+            r = requests.post(GRAPHQL_URL, headers=HEADERS_PHOTO, data=payload, proxies=PROXIES, cookies=COOKIES, timeout=30)
             if r.status_code != 200:
                 break
             
@@ -247,6 +248,12 @@ BASE_HEADERS = {
 # Get proxy configuration
 PROXY = os.getenv('PROXY')
 PROXIES = {'http': PROXY, 'https': PROXY} if PROXY else None
+
+# Cookies (set by UI when provided)
+COOKIES = {}
+
+# FB_DTSG token (set by UI when provided)
+FB_DTSG = ""
 
 if PROXY:
     print(f"Using proxy: {PROXY}")
@@ -485,9 +492,10 @@ def fetch_posts(limit=10, min_comments=0, batch_size=10, on_batch_complete=None)
         }
 
         payload = {
-        "av": "0",
-        "__user": "0",
+        "av": COOKIES.get("c_user", "0"),
+        "__user": COOKIES.get("c_user", "0"),
         "__a": "1",
+        "fb_dtsg": FB_DTSG if FB_DTSG else "",
             "doc_id": DOC_ID,
             "variables": json.dumps(variables),
         }

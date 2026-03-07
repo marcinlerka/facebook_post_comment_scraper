@@ -17,7 +17,7 @@ from group_post_scraper_v2 import fetch_posts as fetch_group_posts
 from single_post_image import fetch_all_images
 
 
-def extract_user_id_from_url(url):
+def extract_user_id_from_url(url, cookies=None):
     """Extract Facebook User ID from a profile URL"""
     # First, try to extract ID directly from URL
     url_patterns = [
@@ -41,7 +41,7 @@ def extract_user_id_from_url(url):
     
     try:
         print(f"  No ID in URL, fetching page: {url}")
-        response = requests.get(url, headers=headers, proxies=PROXIES, timeout=20)
+        response = requests.get(url, headers=headers, cookies=cookies, proxies=PROXIES, timeout=20)
         html = response.text
         
         # Try multiple patterns to find user ID in HTML
@@ -67,7 +67,7 @@ def extract_user_id_from_url(url):
         return None
 
 
-def extract_group_id_from_url(url):
+def extract_group_id_from_url(url, cookies=None):
     """Extract Facebook Group ID from a group URL"""
     # First, try to extract ID directly from URL
     url_patterns = [
@@ -91,7 +91,7 @@ def extract_group_id_from_url(url):
     
     try:
         print(f"  No ID in URL, fetching group page: {url}")
-        response = requests.get(url, headers=headers, proxies=PROXIES, timeout=20)
+        response = requests.get(url, headers=headers, cookies=cookies, proxies=PROXIES, timeout=20)
         html = response.text
         
         # Try multiple patterns to find group ID in HTML
@@ -117,25 +117,63 @@ def extract_group_id_from_url(url):
         return None
 
 
-def extract_post_id_from_url(url):
+def extract_post_id_from_url(url, cookies=None):
     """Extract Facebook Post ID from a post URL"""
+    
+    # First, try to extract post ID directly from URL patterns (no fetch needed)
+    url_patterns = [
+        r'/groups/[^/]+/posts/(\d+)',           # /groups/MemeAddiction/posts/4471339869798423
+        r'/posts/(\d+)',                         # /posts/123456
+        r'/permalink\.php\?story_fbid=(\d+)',   # permalink.php?story_fbid=123456
+        r'story_fbid=(\d+)',                     # story_fbid=123456
+        r'/p/(\d+)',                             # /p/123456
+    ]
+    
+    for pattern in url_patterns:
+        match = re.search(pattern, url)
+        if match:
+            post_id = match.group(1)
+            print(f"  ✅ Found Post ID in URL: {post_id}")
+            return post_id
+    
+    # If no direct pattern match, fetch the page and extract from HTML
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Accept-Language": "en-US,en;q=0.9"
     }
     
     try:
-        print(f"  Fetching post: {url}")
-        response = requests.get(url, headers=headers, proxies=PROXIES, timeout=20)
+        print(f"  No direct ID in URL, fetching post: {url}")
+        response = requests.get(url, headers=headers, cookies=cookies, proxies=PROXIES, timeout=20)
         html = response.text
         
-        # Extract og:url meta tag
+        post_id = None
+        
+        # Method 1: Try storyID (works with authenticated requests)
+        if cookies:
+            story_id_match = re.search(r'"storyID":"([^"]+)"', html)
+            if story_id_match:
+                story_id_encoded = story_id_match.group(1)
+                try:
+                    # Decode base64 storyID
+                    story_id_decoded = base64.b64decode(story_id_encoded).decode('utf-8')
+                    print(f"  📝 Decoded storyID: {story_id_decoded}")
+                    
+                    # Extract post ID (last segment after splitting by ':')
+                    # Format: S:_USER_ID:POST_ID:POST_ID or similar
+                    parts = story_id_decoded.split(':')
+                    if len(parts) >= 2:
+                        post_id = parts[-1]  # Last part is the post ID
+                        print(f"  ✅ Found Post ID from storyID: {post_id}")
+                        return post_id
+                except Exception as e:
+                    print(f"  ⚠️ Could not decode storyID: {e}")
+        
+        # Method 2: Extract og:url meta tag (fallback for unauthenticated or if storyID fails)
         og_url_match = re.search(
             r'<meta property="og:url" content="([^"]+)"',
             html
         )
-        
-        post_id = None
         
         if og_url_match:
             og_url = unescape(og_url_match.group(1))
@@ -151,7 +189,7 @@ def extract_post_id_from_url(url):
                 post_id = m.group(1)
         
         if post_id:
-            print(f"  ✅ Found Post ID: {post_id}")
+            print(f"  ✅ Found Post ID from og:url: {post_id}")
             return post_id
         
         print("  ❌ Post ID not found in URL")
@@ -168,18 +206,18 @@ def convert_post_id_to_feedback_id(post_id):
     return feedback_id
 
 
-def fetch_comments_for_post(post_id):
+def fetch_comments_for_post(post_id, cookies=None):
     """Fetch all comments and replies for a given post_id"""
     feedback_id = convert_post_id_to_feedback_id(post_id)
     print(f"  Fetching comments for post {post_id}...")
     print(f"  Using feedback_id: {feedback_id}")
     
     all_data = []
-    comments, post_info = fetch_comments(feedback_id)
+    comments, post_info = fetch_comments(feedback_id, cookies=cookies)
     
     for c in comments:
         print(f"    🗨️ {c.get('text', '')[:50]}...")
-        c["replies"] = fetch_replies(c)
+        c["replies"] = fetch_replies(c, cookies=cookies)
         
         for r in c["replies"]:
             print(f"       ↳ {r.get('text', '')[:50]}...")

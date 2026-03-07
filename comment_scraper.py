@@ -19,15 +19,18 @@ BASE_HEADERS = {
 PROXY = os.getenv('PROXY')
 PROXIES = {'http': PROXY, 'https': PROXY} if PROXY else None
 
+# FB_DTSG token (set by UI when provided)
+FB_DTSG = ""
+
 if PROXY:
     print(f"Using proxy: {PROXY}")
 
 # ========= RETRY HELPER =========
-def retry_request(url, headers, data, proxies, max_retries=5):
+def retry_request(url, headers, data, proxies, cookies=None, max_retries=5):
     """Make a POST request with retry logic"""
     for attempt in range(1, max_retries + 1):
         try:
-            r = requests.post(url, headers=headers, data=data, proxies=proxies, timeout=30)
+            r = requests.post(url, headers=headers, data=data, proxies=proxies, cookies=cookies, timeout=30)
             if r.status_code == 200:
                 return r
             print(f"  ⚠️ Attempt {attempt}/{max_retries}: Status {r.status_code}")
@@ -43,11 +46,17 @@ def retry_request(url, headers, data, proxies, max_retries=5):
 
 # ===== PAYLOADS =====
 
-def comments_payload(feedback_id, cursor=None):
+def comments_payload(feedback_id, cursor=None, cookies=None):
+    # Extract user ID from cookies if available
+    user_id = "0"
+    if cookies and "c_user" in cookies:
+        user_id = cookies["c_user"]
+    
     return {
-        "av": "0",
-        "__user": "0",
+        "av": user_id,
+        "__user": user_id,
         "__a": "1",
+        "fb_dtsg": FB_DTSG if FB_DTSG else "",
         "doc_id": "25550760954572974",
         "variables": json.dumps({
             "commentsAfterCount": -1,
@@ -62,11 +71,17 @@ def comments_payload(feedback_id, cursor=None):
     }
 
 
-def replies_payload(comment_feedback_id, expansion_token):
+def replies_payload(comment_feedback_id, expansion_token, cookies=None):
+    # Extract user ID from cookies if available
+    user_id = "0"
+    if cookies and "c_user" in cookies:
+        user_id = cookies["c_user"]
+    
     return {
-        "av": "0",
-        "__user": "0",
+        "av": user_id,
+        "__user": user_id,
         "__a": "1",
+        "fb_dtsg": FB_DTSG if FB_DTSG else "",
         "doc_id": "26570577339199586",
         "variables": json.dumps({
             "clientKey": None,
@@ -103,7 +118,7 @@ def fb_json(response_text):
     return json.loads(first)
 
 
-def fetch_comments(feedback_id):
+def fetch_comments(feedback_id, cookies=None):
     results = []
     cursor = None
     response_count = 0
@@ -114,8 +129,9 @@ def fetch_comments(feedback_id):
         r = retry_request(
             GRAPHQL,
             headers,
-            comments_payload(feedback_id, cursor),
-            PROXIES
+            comments_payload(feedback_id, cursor, cookies),
+            PROXIES,
+            cookies=cookies
         )
         j = fb_json(r.text)
         
@@ -184,13 +200,14 @@ def fetch_comments(feedback_id):
 
 # ===== FETCH REPLIES =====
 
-def fetch_replies(comment):
+def fetch_replies(comment, cookies=None):
     headers = {**BASE_HEADERS, "x-fb-friendly-name": "Depth1CommentsListPaginationQuery"}
     r = retry_request(
         GRAPHQL,
         headers,
-        replies_payload(comment["_feedback_id"], comment["_expansion_token"]),
-        PROXIES
+        replies_payload(comment["_feedback_id"], comment["_expansion_token"], cookies),
+        PROXIES,
+        cookies=cookies
     )
 
     j = fb_json(r.text)
