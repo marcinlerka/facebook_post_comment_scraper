@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                              QTextEdit, QComboBox, QSpinBox, QTabWidget,
                              QProgressBar, QGroupBox, QMessageBox, QDialog,
-                             QDialogButtonBox)
+                             QDialogButtonBox, QFrame)
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QFont, QTextCursor
 
@@ -47,7 +47,7 @@ class CookieDialog(QDialog):
     def __init__(self, parent=None, current_cookies="", current_dtsg=""):
         super().__init__(parent)
         self.setWindowTitle("Configure Cookies & FB_DTSG")
-        self.setGeometry(200, 200, 700, 400)
+        self.setGeometry(200, 200, 720, 600)
         
         self.cookies_str = current_cookies
         self.dtsg_str = current_dtsg
@@ -57,26 +57,33 @@ class CookieDialog(QDialog):
         
         # Instructions
         instructions = QLabel(
-            "🔐 Automated Facebook Login\n\n"
-            "Click the button below to:\n"
-            "1. Open Chrome browser automatically\n"
-            "2. Login to Facebook manually\n"
-            "3. Click OK in the popup to capture cookies and fb_dtsg\n"
-            "4. Everything will be extracted automatically!"
+            "🔐 Configure Authentication\n\n"
+            "Choose one of the two methods below to extract cookies and fb_dtsg:"
         )
         instructions.setWordWrap(True)
-        instructions.setStyleSheet("background-color: #e3f2fd; padding: 15px; border-radius: 5px; font-size: 13px;")
+        instructions.setStyleSheet("background-color: #e3f2fd; padding: 12px; border-radius: 5px; font-size: 13px;")
         layout.addWidget(instructions)
-        
-        # Launch button
+
+        # --- Method 1: Chrome login ---
+        method1_label = QLabel("Method 1 — Automated Chrome Login")
+        method1_label.setStyleSheet("font-weight: bold; font-size: 12px; color: #1565C0; margin-top: 6px;")
+        layout.addWidget(method1_label)
+
+        chrome_desc = QLabel(
+            "Opens Chrome automatically. Login to Facebook, then click OK in the popup."
+        )
+        chrome_desc.setWordWrap(True)
+        chrome_desc.setStyleSheet("font-size: 12px; color: #555; margin-bottom: 4px;")
+        layout.addWidget(chrome_desc)
+
         self.launch_btn = QPushButton("🚀 Launch Chrome & Login")
         self.launch_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
-                font-size: 14px;
+                font-size: 13px;
                 font-weight: bold;
-                padding: 15px;
+                padding: 10px;
                 border-radius: 5px;
             }
             QPushButton:hover {
@@ -85,17 +92,65 @@ class CookieDialog(QDialog):
         """)
         self.launch_btn.clicked.connect(self.launch_chrome_login)
         layout.addWidget(self.launch_btn)
-        
+
+        # Divider
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setFrameShadow(QFrame.Shadow.Sunken)
+        divider.setStyleSheet("margin: 8px 0;")
+        layout.addWidget(divider)
+
+        # --- Method 2: cURL paste ---
+        method2_label = QLabel("Method 2 — Paste cURL Command")
+        method2_label.setStyleSheet("font-weight: bold; font-size: 12px; color: #6A1B9A; margin-top: 2px;")
+        layout.addWidget(method2_label)
+
+        curl_desc = QLabel(
+            "In browser DevTools → Network tab, right-click any Facebook GraphQL request "
+            "→ Copy → Copy as cURL. Paste it below and click Parse."
+        )
+        curl_desc.setWordWrap(True)
+        curl_desc.setStyleSheet("font-size: 12px; color: #555; margin-bottom: 4px;")
+        layout.addWidget(curl_desc)
+
+        self.curl_input = QTextEdit()
+        self.curl_input.setPlaceholderText(
+            "curl 'https://www.facebook.com/api/graphql/' \\\n"
+            "  -H 'accept: */*' \\\n"
+            "  -b 'datr=...; c_user=...; xs=...' \\\n"
+            "  --data-raw 'fb_dtsg=...&lsd=...'"
+        )
+        self.curl_input.setMinimumHeight(110)
+        self.curl_input.setStyleSheet("font-family: monospace; font-size: 11px;")
+        layout.addWidget(self.curl_input)
+
+        self.parse_btn = QPushButton("🔍 Parse cURL")
+        self.parse_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #9C27B0;
+                color: white;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 10px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #7B1FA2;
+            }
+        """)
+        self.parse_btn.clicked.connect(self.parse_curl_command)
+        layout.addWidget(self.parse_btn)
+
         # Status label
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("padding: 10px; font-size: 12px;")
         layout.addWidget(self.status_label)
-        
+
         # Display extracted values
         self.result_display = QTextEdit()
         self.result_display.setReadOnly(True)
-        self.result_display.setMaximumHeight(120)
+        self.result_display.setMaximumHeight(100)
         self.result_display.setPlaceholderText("Extracted cookies and fb_dtsg will appear here...")
         layout.addWidget(self.result_display)
         
@@ -221,10 +276,77 @@ class CookieDialog(QDialog):
             self.status_label.setStyleSheet("padding: 10px; font-size: 12px; color: #f44336;")
             self.launch_btn.setEnabled(True)
     
+    def parse_curl_command(self):
+        """Parse a pasted cURL command and extract cookies and fb_dtsg."""
+        from urllib.parse import parse_qs, unquote
+
+        curl_text = self.curl_input.toPlainText().strip()
+        if not curl_text:
+            self.status_label.setText("⚠️ Please paste a cURL command first.")
+            self.status_label.setStyleSheet("padding: 10px; font-size: 12px; color: #FF9800;")
+            return
+
+        # --- 1. Extract cookies from -b / --cookie flag ---
+        # Handles both single-quoted and double-quoted values, multiline cURL
+        cookies_str = ""
+        cookie_match = re.search(r"(?:^|\s)-b\s+['\"]([^'\"]+)['\"]", curl_text, re.MULTILINE)
+        if cookie_match:
+            cookies_str = cookie_match.group(1).strip()
+
+        # --- 2. Extract --data-raw / --data / -d body ---
+        body_raw = ""
+        data_match = re.search(
+            r"(?:--data-raw|--data-urlencode|--data|-d)\s+['\"]([^'\"]+)['\"]",
+            curl_text, re.MULTILINE | re.DOTALL
+        )
+        if data_match:
+            body_raw = data_match.group(1).strip()
+
+        # --- 3. Extract fb_dtsg from POST body ---
+        fb_dtsg = None
+        if body_raw:
+            params = parse_qs(body_raw)
+            if 'fb_dtsg' in params:
+                fb_dtsg = params['fb_dtsg'][0]
+            else:
+                # fallback: raw regex + manual decode
+                m = re.search(r'fb_dtsg=([^&\s]+)', body_raw)
+                if m:
+                    fb_dtsg = unquote(m.group(1))
+
+        # --- 4. Validate ---
+        if not cookies_str and not fb_dtsg:
+            self.status_label.setText(
+                "❌ Could not find cookies (-b flag) or fb_dtsg (--data-raw) in the pasted cURL."
+            )
+            self.status_label.setStyleSheet("padding: 10px; font-size: 12px; color: #f44336;")
+            return
+
+        self.cookies_str = cookies_str
+        self.dtsg_str = fb_dtsg if fb_dtsg else ""
+
+        # --- 5. Show summary ---
+        cookie_count = len([c for c in cookies_str.split(';') if '=' in c]) if cookies_str else 0
+        display_text = "✅ Successfully extracted from cURL command!\n\n"
+        display_text += f"Cookies : {'Found ✓ (' + str(cookie_count) + ' cookies)' if cookies_str else 'Not found ✗'}\n"
+        display_text += f"FB_DTSG : {'Found ✓' if fb_dtsg else 'Not found ✗'}\n"
+        if fb_dtsg:
+            dtsg_preview = fb_dtsg[:40] + ('...' if len(fb_dtsg) > 40 else '')
+            display_text += f"          {dtsg_preview}\n"
+        if cookies_str:
+            display_text += f"\nCookie preview: {cookies_str[:100]}..."
+
+        self.result_display.setPlainText(display_text)
+        self.status_label.setText("✅ Parsed successfully! Click OK to save.")
+        self.status_label.setStyleSheet(
+            "padding: 10px; font-size: 12px; color: #4CAF50; font-weight: bold;"
+        )
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(True)
+
     def get_cookies(self):
         """Get the extracted cookie string"""
         return self.cookies_str
-    
+
     def get_dtsg(self):
         """Get the extracted fb_dtsg token"""
         return self.dtsg_str
