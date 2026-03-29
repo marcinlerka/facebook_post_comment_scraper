@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 STATIC_PORT_MIN = 10000
-STATIC_PORT_MAX = 20000
+STATIC_PORT_MAX = 10000
 
 
 def _replace_trailing_port(proxy_url: str, port: int) -> str:
