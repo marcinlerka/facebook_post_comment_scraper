@@ -1,5 +1,4 @@
 import os
-import re
 import random
 import requests
 from dotenv import load_dotenv
@@ -10,20 +9,32 @@ STATIC_PORT_MIN = 10000
 STATIC_PORT_MAX = 20000
 
 
+def _replace_trailing_port(proxy_url: str, port: int) -> str:
+    """Replace only the last :port part of a proxy URL if present."""
+    head, sep, tail = proxy_url.rpartition(':')
+    if not sep or not tail.isdigit():
+        return proxy_url
+    return f"{head}:{port}"
+
+
+def _build_proxy_dict(proxy_url: str):
+    return {'http': proxy_url, 'https': proxy_url}
+
+
 def rotate_static_proxy():
     """
     Pick a brand-new random static port and return a fresh proxy dict.
     Call this whenever a static proxy appears blocked or unreachable.
-    Returns None if PROXY is not configured.
+    Returns None if STATIC_PROXY (or fallback PROXY) is not configured.
     """
-    proxy_base = os.getenv('PROXY', '').strip()
+    proxy_base = os.getenv('STATIC_PROXY', '').strip() or os.getenv('PROXY', '').strip()
     if not proxy_base:
         return None
 
     port = random.randint(STATIC_PORT_MIN, STATIC_PORT_MAX)
-    proxy_url = re.sub(r':\d+$', f':{port}', proxy_base)
+    proxy_url = _replace_trailing_port(proxy_base, port)
     print(f"  🔁 Static proxy rotated → new port {port}  ({proxy_url})")
-    return {'http': proxy_url, 'https': proxy_url}
+    return _build_proxy_dict(proxy_url)
 
 
 def is_proxy_infra_error(exc=None, status_code=None) -> bool:
@@ -72,27 +83,33 @@ def select_proxy(has_cookies: bool):
     Return a requests-compatible proxy dict, choosing the mode based on
     whether a cookie session is active.
 
-    has_cookies=True  → static proxy  (random port in 10000-20000 range)
-                        Same credentials/host as PROXY env var, port swapped.
-    has_cookies=False → rotating proxy (the original PROXY env var as-is)
+    has_cookies=True  → static proxy from STATIC_PROXY (country can already be
+                        embedded in username, e.g. __cr.fr), with random port.
+    has_cookies=False → rotating proxy from ROTATING_PROXY as-is.
 
-    Returns None if PROXY is not configured.
+    Backward compatibility:
+    - If ROTATING_PROXY is missing, falls back to PROXY for rotating mode.
+    - If STATIC_PROXY is missing, falls back to PROXY for static mode.
     """
-    proxy_base = os.getenv('PROXY', '').strip()
-    if not proxy_base:
+    rotating_proxy = os.getenv('ROTATING_PROXY', '').strip() or os.getenv('PROXY', '').strip()
+    static_proxy = os.getenv('STATIC_PROXY', '').strip() or os.getenv('PROXY', '').strip()
+
+    if has_cookies:
+        if not static_proxy:
+            print("⚠️  No STATIC_PROXY configured — requests will be made without a proxy")
+            return None
+
+        port = random.randint(STATIC_PORT_MIN, STATIC_PORT_MAX)
+        proxy_url = _replace_trailing_port(static_proxy, port)
+        print("🔒 Proxy mode : STATIC  (cookie-based session, fixed IP)")
+        print(f"   Port chosen : {port}  (range {STATIC_PORT_MIN}-{STATIC_PORT_MAX})")
+        print(f"   Proxy URL   : {proxy_url}")
+        return _build_proxy_dict(proxy_url)
+
+    if not rotating_proxy:
         print("⚠️  No PROXY configured — requests will be made without a proxy")
         return None
 
-    if has_cookies:
-        port = random.randint(STATIC_PORT_MIN, STATIC_PORT_MAX)
-        # Replace the port at the very end of the URL (e.g. :823 → :12345)
-        proxy_url = re.sub(r':\d+$', f':{port}', proxy_base)
-        print(f"🔒 Proxy mode : STATIC  (cookie-based session, fixed IP)")
-        print(f"   Port chosen : {port}  (range {STATIC_PORT_MIN}–{STATIC_PORT_MAX})")
-        print(f"   Proxy URL   : {proxy_url}")
-    else:
-        proxy_url = proxy_base
-        print(f"🔄 Proxy mode : ROTATING  (no cookies, rotating IP per request)")
-        print(f"   Proxy URL   : {proxy_url}")
-
-    return {'http': proxy_url, 'https': proxy_url}
+    print("🔄 Proxy mode : ROTATING  (no cookies, rotating IP per request)")
+    print(f"   Proxy URL   : {rotating_proxy}")
+    return _build_proxy_dict(rotating_proxy)
