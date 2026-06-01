@@ -38,6 +38,40 @@ def reply_page(text, has_next_page=False, end_cursor=None):
 
 
 class FetchRepliesTests(unittest.TestCase):
+    def test_fetch_post_text_from_profile_finds_matching_story(self):
+        timeline_payload = {
+            "data": {
+                "node": {
+                    "timeline_list_feed_units": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "__typename": "Story",
+                                    "post_id": "post-1",
+                                    "comet_sections": {
+                                        "content": {
+                                            "story": {
+                                                "message": {"text": "full post body"}
+                                            }
+                                        }
+                                    },
+                                }
+                            }
+                        ],
+                        "page_info": {"has_next_page": False, "end_cursor": None},
+                    }
+                }
+            }
+        }
+
+        def fake_retry_request(url, headers, data, proxies, cookies=None):
+            return FakeResponse(timeline_payload)
+
+        with patch.object(comment_scraper, "retry_request", side_effect=fake_retry_request):
+            post_text = comment_scraper.fetch_post_text_from_profile("author-1", "post-1")
+
+        self.assertEqual(post_text, "full post body")
+
     def test_comments_payload_uses_top_level_comment_cursor(self):
         payload = comment_scraper.comments_payload("feedback-id", cursor="comment-cursor")
         variables = json.loads(payload["variables"])

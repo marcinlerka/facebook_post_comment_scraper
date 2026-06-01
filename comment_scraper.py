@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GRAPHQL = "https://www.facebook.com/api/graphql/"
+PROFILE_TIMELINE_DOC_ID = "25430544756617998"
 
 # Base headers for all requests
 BASE_HEADERS = {
@@ -124,6 +125,29 @@ def replies_payload(comment_feedback_id, expansion_token, cookies=None, cursor=N
         })
     }
 
+
+def profile_posts_payload(profile_id, cursor=None, cookies=None):
+    user_id = "0"
+    if cookies and "c_user" in cookies:
+        user_id = cookies["c_user"]
+
+    return {
+        "av": user_id,
+        "__user": user_id,
+        "__a": "1",
+        "fb_dtsg": FB_DTSG if FB_DTSG else "",
+        "doc_id": PROFILE_TIMELINE_DOC_ID,
+        "variables": json.dumps({
+            "count": 3,
+            "cursor": cursor,
+            "id": profile_id,
+            "feedLocation": "TIMELINE",
+            "renderLocation": "timeline",
+            "scale": 2,
+            "useDefaultActor": False
+        })
+    }
+
 # ===== FETCH COMMENTS =====
 import json
 
@@ -146,6 +170,118 @@ def fb_json(response_text):
     first = text.split("\n")[0].strip()
 
     return json.loads(first)
+
+
+def extract_data_blocks(raw_text):
+    blocks = []
+    i = 0
+    n = len(raw_text)
+
+    while True:
+        idx = raw_text.find('"data"', i)
+        if idx == -1:
+            break
+
+        brace_start = raw_text.find('{', idx)
+        if brace_start == -1:
+            break
+
+        depth = 0
+        for j in range(brace_start, n):
+            if raw_text[j] == '{':
+                depth += 1
+            elif raw_text[j] == '}':
+                depth -= 1
+                if depth == 0:
+                    block_text = raw_text[brace_start:j + 1]
+                    try:
+                        blocks.append(json.loads(block_text))
+                    except Exception:
+                        pass
+                    i = j + 1
+                    break
+        else:
+            break
+
+    return blocks
+
+
+def extract_story_nodes(blocks):
+    story_nodes = []
+    timeline_block = None
+    page_info = None
+
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+
+        if "page_info" in block:
+            page_info = block.get("page_info")
+            continue
+
+        node = block.get("node", {})
+        node_typename = node.get("__typename")
+
+        if "timeline_list_feed_units" in node:
+            timeline_block = block
+            edges = node["timeline_list_feed_units"].get("edges", [])
+            for edge in edges:
+                edge_node = edge.get("node")
+                if edge_node and edge_node.get("__typename") == "Story":
+                    story_nodes.append(edge_node)
+        elif node_typename == "Story":
+            story_nodes.append(node)
+
+    return story_nodes, timeline_block, page_info
+
+
+def story_text(node):
+    return (
+        node.get("comet_sections", {})
+        .get("content", {})
+        .get("story", {})
+        .get("message", {})
+        .get("text")
+    )
+
+
+def fetch_post_text_from_profile(profile_id, post_id, cookies=None, max_pages=30):
+    cursor = None
+    page_num = 0
+
+    while page_num < max_pages:
+        page_num += 1
+        headers = {**BASE_HEADERS, "x-fb-friendly-name": "ProfileCometTimelineFeedRefetchQuery"}
+        r = retry_request(
+            GRAPHQL,
+            headers,
+            profile_posts_payload(profile_id, cursor, cookies),
+            PROXIES,
+            cookies=cookies
+        )
+
+        blocks = extract_data_blocks(r.text)
+        story_nodes, timeline_block, page_info = extract_story_nodes(blocks)
+
+        for node in story_nodes:
+            if str(node.get("post_id")) == str(post_id):
+                return story_text(node)
+
+        page_info = page_info or {}
+        if timeline_block:
+            page_info = (
+                timeline_block.get("node", {})
+                .get("timeline_list_feed_units", {})
+                .get("page_info", {})
+            ) or page_info
+
+        cursor = page_info.get("end_cursor")
+        if not cursor:
+            break
+
+        time.sleep(1)
+
+    return None
 
 
 def fetch_comments(feedback_id, cookies=None):
@@ -191,9 +327,16 @@ def fetch_comments(feedback_id, cookies=None):
                 parent_post_story = n.get("parent_post_story", {})
                 
                 if parent_post_story:
+                    parent_feedback = n.get("parent_feedback", {})
+                    owning_profile = parent_feedback.get("owning_profile", {})
+                    post_id = parent_feedback.get("share_fbid")
                     post_info = {
                         "post_story_id": parent_post_story.get("id"),
-                        "media_id": None
+                        "media_id": None,
+                        "post_id": post_id,
+                        "author": owning_profile.get("name"),
+                        "author_id": owning_profile.get("id"),
+                        "text": None
                     }
                     
                     # Extract first media ID
@@ -203,6 +346,13 @@ def fetch_comments(feedback_id, cookies=None):
                         if media and media.get("id"):
                             post_info["media_id"] = media.get("id")
                             break  # Only get first one
+
+                    if post_info["author_id"] and post_info["post_id"]:
+                        post_info["text"] = fetch_post_text_from_profile(
+                            post_info["author_id"],
+                            post_info["post_id"],
+                            cookies=cookies
+                        )
                     
                     print(f"📎 Extracted post info: {post_info}")
 
