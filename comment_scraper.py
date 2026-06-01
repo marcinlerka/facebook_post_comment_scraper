@@ -147,7 +147,7 @@ def replies_payload(comment_feedback_id, expansion_token, cookies=None, cursor=N
     }
 
 
-def profile_posts_payload(profile_id, cursor=None, cookies=None, count=10):
+def profile_posts_payload(profile_id, cursor=None, cookies=None, count=3):
     user_id = "0"
     if cookies and "c_user" in cookies:
         user_id = cookies["c_user"]
@@ -266,12 +266,69 @@ def story_text(node):
     )
 
 
-def fetch_post_text_from_profile(
+def story_created_time(node):
+    timestamp_story = (
+        node.get("comet_sections", {})
+        .get("timestamp", {})
+        .get("story", {})
+    )
+    metadata = (
+        node.get("comet_sections", {})
+        .get("context_layout", {})
+        .get("story", {})
+        .get("comet_sections", {})
+        .get("metadata", [])
+    )
+    context_timestamp_story = (
+        metadata[0].get("story", {})
+        if metadata
+        else {}
+    )
+
+    return timestamp_story.get("creation_time") or context_timestamp_story.get("creation_time")
+
+
+def story_attachments(node):
+    attachments = []
+
+    for attachment in node.get("attachments") or []:
+        media = attachment.get("media") or {}
+        styled_media = (
+            attachment.get("styles", {})
+            .get("attachment", {})
+            .get("media", {})
+        )
+        media = {**media, **styled_media}
+
+        file_url = (
+            media.get("photo_image", {}).get("uri")
+            or media.get("image", {}).get("uri")
+            or media.get("viewer_image", {}).get("uri")
+        )
+        media_id = media.get("id")
+
+        if not file_url and not media_id:
+            continue
+
+        attachments.append({
+            "media_id": media_id,
+            "type": media.get("__typename"),
+            "url": media.get("url"),
+            "file_url": file_url,
+            "width": media.get("photo_image", {}).get("width"),
+            "height": media.get("photo_image", {}).get("height"),
+            "accessibility_caption": media.get("accessibility_caption"),
+        })
+
+    return attachments
+
+
+def fetch_post_details_from_profile(
     profile_id,
     post_id,
     cookies=None,
     max_pages=50,
-    page_size=10,
+    page_size=3,
     sleep_seconds=0.25,
 ):
     cursor = None
@@ -293,7 +350,14 @@ def fetch_post_text_from_profile(
 
         for node in story_nodes:
             if str(node.get("post_id")) == str(post_id):
-                return story_text(node)
+                created_time = story_created_time(node)
+                return {
+                    "text": story_text(node),
+                    "created_time": created_time,
+                    "created_time_iso": created_time_iso(created_time),
+                    "attachments": story_attachments(node),
+                    "source_url": node.get("permalink_url"),
+                }
 
         page_info = page_info or {}
         if timeline_block:
@@ -310,7 +374,26 @@ def fetch_post_text_from_profile(
         if sleep_seconds:
             time.sleep(sleep_seconds)
 
-    return None
+    return {}
+
+
+def fetch_post_text_from_profile(
+    profile_id,
+    post_id,
+    cookies=None,
+    max_pages=50,
+    page_size=3,
+    sleep_seconds=0.25,
+):
+    details = fetch_post_details_from_profile(
+        profile_id,
+        post_id,
+        cookies=cookies,
+        max_pages=max_pages,
+        page_size=page_size,
+        sleep_seconds=sleep_seconds,
+    )
+    return details.get("text")
 
 
 def fetch_comments(feedback_id, cookies=None):
@@ -366,7 +449,10 @@ def fetch_comments(feedback_id, cookies=None):
                         "post_id": post_id,
                         "author": owning_profile.get("name"),
                         "author_id": owning_profile.get("id"),
-                        "text": None
+                        "text": None,
+                        "created_time": None,
+                        "created_time_iso": None,
+                        "attachments": [],
                     }
                     
                     # Extract first media ID
@@ -378,11 +464,19 @@ def fetch_comments(feedback_id, cookies=None):
                             break  # Only get first one
 
                     if post_info["author_id"] and post_info["post_id"]:
-                        post_info["text"] = fetch_post_text_from_profile(
+                        post_details = fetch_post_details_from_profile(
                             post_info["author_id"],
                             post_info["post_id"],
                             cookies=cookies
                         )
+                        post_info.update({
+                            key: value
+                            for key, value in post_details.items()
+                            if value not in (None, "", [])
+                        })
+
+                        if post_info["attachments"] and not post_info["media_id"]:
+                            post_info["media_id"] = post_info["attachments"][0].get("media_id")
                     
                     print(f"📎 Extracted post info: {post_info}")
 

@@ -221,6 +221,8 @@ def render_post_header(data):
 
     if post_author:
         lines.extend([f"**Author:** {mention(post_author)}", ""])
+    if post_info.get("created_time") or post_info.get("created_time_iso"):
+        lines.extend([f"**Posted:** {display_time(post_info)}", ""])
     if data.get("source_url"):
         lines.extend([f"**Source:** {data['source_url']}", ""])
 
@@ -234,6 +236,19 @@ def render_post_header(data):
                 lines.append("")
     else:
         lines.append("_No post text captured._")
+        lines.append("")
+
+    attachments = post_info.get("attachments") or []
+    if attachments:
+        lines.append("## Attachments")
+        lines.append("")
+        for index, attachment in enumerate(attachments, start=1):
+            label = attachment.get("type") or "Attachment"
+            target = attachment.get("saved_file") or attachment.get("url") or attachment.get("file_url")
+            if target:
+                lines.append(f"- [{markdown_escape(label)} {index}]({target})")
+            else:
+                lines.append(f"- {markdown_escape(label)} {index}")
         lines.append("")
 
     return lines

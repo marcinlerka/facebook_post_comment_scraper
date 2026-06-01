@@ -15,6 +15,13 @@ class JsonToMarkdownTests(unittest.TestCase):
             "post_info": {
                 "author": "Adam Example",
                 "text": "Full post text",
+                "created_time_iso": "2026-05-19T13:06:55+00:00",
+                "attachments": [
+                    {
+                        "type": "Photo",
+                        "saved_file": "post-1_attachment_1.jpg",
+                    }
+                ],
             },
             "comments": [
                 {
@@ -71,6 +78,8 @@ class JsonToMarkdownTests(unittest.TestCase):
         self.assertIn("    - **@Nested Reply** replying to @First Reply", markdown)
         self.assertIn("_24 reactions", markdown)
         self.assertIn("**Author:** @Adam Example", markdown)
+        self.assertIn("**Posted:** 2026-05-19 13:06 UTC", markdown)
+        self.assertIn("- [Photo 1](post-1_attachment_1.jpg)", markdown)
 
     def test_fills_missing_post_text_from_source_url(self):
         data = {
