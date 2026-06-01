@@ -14,7 +14,7 @@ class FakeResponse:
         self.text = json.dumps(payload)
 
 
-def reply_page(text, has_next_page=False, end_cursor=None):
+def reply_page(text, has_next_page=False, end_cursor=None, reply_id="reply-1"):
     return {
         "data": {
             "node": {
@@ -22,6 +22,8 @@ def reply_page(text, has_next_page=False, end_cursor=None):
                     "edges": [
                         {
                             "node": {
+                                "legacy_fbid": reply_id,
+                                "author": {"name": "Reply Author", "id": "reply-author-id"},
                                 "body": {"text": text},
                                 "feedback": {"reactors": {"count_reduced": "0"}},
                             }
@@ -72,6 +74,56 @@ class FetchRepliesTests(unittest.TestCase):
 
         self.assertEqual(post_text, "full post body")
 
+    def test_fetch_comments_includes_author_metadata(self):
+        comment_payload = {
+            "data": {
+                "node": {
+                    "comment_rendering_instance_for_feed_location": {
+                        "comments": {
+                            "edges": [
+                                {
+                                    "node": {
+                                        "legacy_fbid": "comment-1",
+                                        "author": {"name": "Comment Author", "id": "comment-author-id"},
+                                        "body": {"text": "comment text"},
+                                        "feedback": {
+                                            "id": "feedback-1",
+                                            "reactors": {"count_reduced": "0"},
+                                            "expansion_info": {"expansion_token": "token-1"},
+                                        },
+                                    }
+                                }
+                            ],
+                            "page_info": {"end_cursor": None},
+                        }
+                    }
+                }
+            }
+        }
+
+        with patch.object(comment_scraper, "retry_request", return_value=FakeResponse(comment_payload)):
+            comments, _ = comment_scraper.fetch_comments("post-feedback-id")
+
+        self.assertEqual(comments[0]["comment_id"], "comment-1")
+        self.assertEqual(comments[0]["author"], "Comment Author")
+        self.assertEqual(comments[0]["author_id"], "comment-author-id")
+
+    def test_fetch_replies_includes_author_metadata(self):
+        responses = [
+            FakeResponse(reply_page("reply text", has_next_page=False)),
+        ]
+        comment = {
+            "_feedback_id": "feedback-id",
+            "_expansion_token": "expansion-token",
+        }
+
+        with patch.object(comment_scraper, "retry_request", return_value=responses[0]):
+            replies = comment_scraper.fetch_replies(comment)
+
+        self.assertEqual(replies[0]["reply_id"], "reply-1")
+        self.assertEqual(replies[0]["author"], "Reply Author")
+        self.assertEqual(replies[0]["author_id"], "reply-author-id")
+
     def test_comments_payload_uses_top_level_comment_cursor(self):
         payload = comment_scraper.comments_payload("feedback-id", cursor="comment-cursor")
         variables = json.loads(payload["variables"])
@@ -81,8 +133,8 @@ class FetchRepliesTests(unittest.TestCase):
 
     def test_fetch_replies_paginates_until_no_next_page(self):
         responses = [
-            FakeResponse(reply_page("first reply", has_next_page=True, end_cursor="cursor-1")),
-            FakeResponse(reply_page("second reply", has_next_page=False)),
+            FakeResponse(reply_page("first reply", has_next_page=True, end_cursor="cursor-1", reply_id="reply-1")),
+            FakeResponse(reply_page("second reply", has_next_page=False, reply_id="reply-2")),
         ]
         calls = []
 
