@@ -412,6 +412,8 @@ def fetch_replies(comment, cookies=None):
             n = e["node"]
             fb = n.get("feedback", {})
             author = n.get("author") or {}
+            direct_parent = n.get("comment_direct_parent") or {}
+            direct_parent_author = direct_parent.get("author") or {}
 
             # Extract reaction count
             reactors = fb.get("reactors", {})
@@ -428,6 +430,9 @@ def fetch_replies(comment, cookies=None):
                 "author": author.get("name"),
                 "author_id": author.get("id"),
                 "text": reply_text,
+                "parent_comment_id": direct_parent.get("id"),
+                "parent_author": direct_parent_author.get("name"),
+                "parent_author_id": direct_parent_author.get("id"),
                 "reaction_count": total_reactions
             })
 
