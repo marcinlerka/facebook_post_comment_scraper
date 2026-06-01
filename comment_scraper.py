@@ -147,7 +147,7 @@ def replies_payload(comment_feedback_id, expansion_token, cookies=None, cursor=N
     }
 
 
-def profile_posts_payload(profile_id, cursor=None, cookies=None):
+def profile_posts_payload(profile_id, cursor=None, cookies=None, count=10):
     user_id = "0"
     if cookies and "c_user" in cookies:
         user_id = cookies["c_user"]
@@ -159,7 +159,7 @@ def profile_posts_payload(profile_id, cursor=None, cookies=None):
         "fb_dtsg": FB_DTSG if FB_DTSG else "",
         "doc_id": PROFILE_TIMELINE_DOC_ID,
         "variables": json.dumps({
-            "count": 3,
+            "count": count,
             "cursor": cursor,
             "id": profile_id,
             "feedLocation": "TIMELINE",
@@ -266,7 +266,14 @@ def story_text(node):
     )
 
 
-def fetch_post_text_from_profile(profile_id, post_id, cookies=None, max_pages=30):
+def fetch_post_text_from_profile(
+    profile_id,
+    post_id,
+    cookies=None,
+    max_pages=50,
+    page_size=10,
+    sleep_seconds=0.25,
+):
     cursor = None
     page_num = 0
 
@@ -276,7 +283,7 @@ def fetch_post_text_from_profile(profile_id, post_id, cookies=None, max_pages=30
         r = retry_request(
             GRAPHQL,
             headers,
-            profile_posts_payload(profile_id, cursor, cookies),
+            profile_posts_payload(profile_id, cursor, cookies, count=page_size),
             PROXIES,
             cookies=cookies
         )
@@ -300,7 +307,8 @@ def fetch_post_text_from_profile(profile_id, post_id, cookies=None, max_pages=30
         if not cursor:
             break
 
-        time.sleep(1)
+        if sleep_seconds:
+            time.sleep(sleep_seconds)
 
     return None
 
