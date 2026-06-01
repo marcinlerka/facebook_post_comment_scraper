@@ -322,6 +322,7 @@ def attachment_extension(url, content_type):
 
 def save_post_files(folder_path, post_id, post_info):
     attachments = post_info.get("attachments") or []
+    files_folder = os.path.join(folder_path, "files")
     for index, attachment in enumerate(attachments, start=1):
         file_url = attachment.get("file_url")
         if not file_url:
@@ -336,11 +337,12 @@ def save_post_files(folder_path, post_id, post_info):
 
         extension = attachment_extension(file_url, response.headers.get("content-type"))
         filename = f"{post_id}_attachment_{index}{extension}"
-        output_path = os.path.join(folder_path, filename)
+        os.makedirs(files_folder, exist_ok=True)
+        output_path = os.path.join(files_folder, filename)
         with open(output_path, "wb") as f:
             f.write(response.content)
 
-        attachment["saved_file"] = filename
+        attachment["saved_file"] = os.path.join("files", filename)
         print(f"  📎 Saved attachment to {output_path}")
 
 

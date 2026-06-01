@@ -54,9 +54,9 @@ class SortCommentsForExportTests(unittest.TestCase):
             with patch("main.requests.get", return_value=FakeResponse()):
                 save_post_files(tmpdir, "post-1", post_info)
 
-            output_path = Path(tmpdir) / "post-1_attachment_1.jpg"
+            output_path = Path(tmpdir) / "files" / "post-1_attachment_1.jpg"
             self.assertEqual(output_path.read_bytes(), b"image-bytes")
-            self.assertEqual(post_info["attachments"][0]["saved_file"], "post-1_attachment_1.jpg")
+            self.assertEqual(post_info["attachments"][0]["saved_file"], "files/post-1_attachment_1.jpg")
 
 
 if __name__ == "__main__":
