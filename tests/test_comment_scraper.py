@@ -54,12 +54,34 @@ class FetchRepliesTests(unittest.TestCase):
                                     "__typename": "Story",
                                     "post_id": "post-1",
                                     "comet_sections": {
+                                        "timestamp": {
+                                            "story": {"creation_time": 1779196015}
+                                        },
                                         "content": {
                                             "story": {
                                                 "message": {"text": "full post body"}
                                             }
                                         }
                                     },
+                                    "attachments": [
+                                        {
+                                            "styles": {
+                                                "attachment": {
+                                                    "media": {
+                                                        "__typename": "Photo",
+                                                        "id": "media-1",
+                                                        "photo_image": {
+                                                            "uri": "https://example.com/image.jpg",
+                                                            "width": 720,
+                                                            "height": 404,
+                                                        },
+                                                        "url": "https://example.com/photo",
+                                                        "accessibility_caption": "caption",
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    ],
                                 }
                             }
                         ],
@@ -76,6 +98,70 @@ class FetchRepliesTests(unittest.TestCase):
             post_text = comment_scraper.fetch_post_text_from_profile("author-1", "post-1")
 
         self.assertEqual(post_text, "full post body")
+
+        with patch.object(comment_scraper, "retry_request", side_effect=fake_retry_request):
+            post_details = comment_scraper.fetch_post_details_from_profile("author-1", "post-1")
+
+        self.assertEqual(post_details["created_time"], 1779196015)
+        self.assertEqual(post_details["created_time_iso"], "2026-05-19T13:06:55+00:00")
+        self.assertEqual(post_details["attachments"][0]["media_id"], "media-1")
+        self.assertEqual(post_details["attachments"][0]["file_url"], "https://example.com/image.jpg")
+
+    def test_fetch_post_text_from_profile_paginates_with_stable_page_size(self):
+        first_page = {
+            "data": {
+                "node": {
+                    "timeline_list_feed_units": {
+                        "edges": [],
+                        "page_info": {"has_next_page": True, "end_cursor": "next-page"},
+                    }
+                }
+            }
+        }
+        second_page = {
+            "data": {
+                "node": {
+                    "timeline_list_feed_units": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "__typename": "Story",
+                                    "post_id": "post-1",
+                                    "comet_sections": {
+                                        "content": {
+                                            "story": {
+                                                "message": {"text": "full post body"}
+                                            }
+                                        }
+                                    },
+                                }
+                            }
+                        ],
+                        "page_info": {"has_next_page": False, "end_cursor": None},
+                    }
+                }
+            }
+        }
+        responses = [FakeResponse(first_page), FakeResponse(second_page)]
+        calls = []
+
+        def fake_retry_request(url, headers, data, proxies, cookies=None):
+            calls.append(data)
+            return responses.pop(0)
+
+        with patch.object(comment_scraper, "retry_request", side_effect=fake_retry_request):
+            post_text = comment_scraper.fetch_post_text_from_profile(
+                "author-1",
+                "post-1",
+                sleep_seconds=0,
+            )
+
+        self.assertEqual(post_text, "full post body")
+        self.assertEqual(len(calls), 2)
+        first_variables = json.loads(calls[0]["variables"])
+        second_variables = json.loads(calls[1]["variables"])
+        self.assertEqual(first_variables["count"], 3)
+        self.assertEqual(second_variables["cursor"], "next-page")
 
     def test_fetch_comments_includes_author_metadata(self):
         comment_payload = {

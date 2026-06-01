@@ -5,6 +5,8 @@ import time
 import requests
 import re
 from html import unescape
+from pathlib import Path
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -286,6 +288,8 @@ def save_post_data(post_type, post_id, post_data, comments_data):
     
     os.makedirs(folder_path, exist_ok=True)
     
+    save_post_files(folder_path, post_id, post_data.get("post_info") or {})
+
     # Combine post and comments in single file
     combined_data = {
         **post_data,
@@ -297,6 +301,49 @@ def save_post_data(post_type, post_id, post_data, comments_data):
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(combined_data, f, ensure_ascii=False, indent=2)
     print(f"  💾 Saved to {output_file}")
+
+
+def attachment_extension(url, content_type):
+    content_type = (content_type or "").split(";")[0].strip().lower()
+    content_extensions = {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+        "application/pdf": ".pdf",
+    }
+    if content_type in content_extensions:
+        return content_extensions[content_type]
+
+    suffix = Path(urlparse(url).path).suffix
+    return suffix if suffix else ".bin"
+
+
+def save_post_files(folder_path, post_id, post_info):
+    attachments = post_info.get("attachments") or []
+    files_folder = os.path.join(folder_path, "files")
+    for index, attachment in enumerate(attachments, start=1):
+        file_url = attachment.get("file_url")
+        if not file_url:
+            continue
+
+        try:
+            response = requests.get(file_url, proxies=PROXIES, timeout=30)
+            response.raise_for_status()
+        except Exception as e:
+            print(f"  ⚠️ Failed to download attachment {index}: {e}")
+            continue
+
+        extension = attachment_extension(file_url, response.headers.get("content-type"))
+        filename = f"{post_id}_attachment_{index}{extension}"
+        os.makedirs(files_folder, exist_ok=True)
+        output_path = os.path.join(files_folder, filename)
+        with open(output_path, "wb") as f:
+            f.write(response.content)
+
+        attachment["saved_file"] = os.path.join("files", filename)
+        print(f"  📎 Saved attachment to {output_path}")
 
 
 def display_menu():
