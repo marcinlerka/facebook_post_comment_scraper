@@ -203,6 +203,41 @@ def convert_post_id_to_feedback_id(post_id):
     return feedback_id
 
 
+def numeric_value(value, default=0):
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower().replace(",", "")
+        multipliers = {
+            "k": 1000,
+            "m": 1000000,
+        }
+        suffix = normalized[-1:] if normalized else ""
+        try:
+            if suffix in multipliers:
+                return float(normalized[:-1]) * multipliers[suffix]
+            return float(normalized)
+        except ValueError:
+            return default
+    return default
+
+
+def sort_comments_for_export(comments):
+    for comment in comments:
+        comment["replies"] = sorted(
+            comment.get("replies", []),
+            key=lambda reply: numeric_value(reply.get("created_time")),
+        )
+
+    return sorted(
+        comments,
+        key=lambda comment: numeric_value(comment.get("reaction_count")),
+        reverse=True,
+    )
+
+
 def fetch_comments_for_post(post_id, cookies=None):
     """Fetch all comments and replies for a given post_id"""
     feedback_id = convert_post_id_to_feedback_id(post_id)
@@ -223,6 +258,7 @@ def fetch_comments_for_post(post_id, cookies=None):
         c_clean = {k: v for k, v in c.items() if not k.startswith('_')}
         all_data.append(c_clean)
     
+    all_data = sort_comments_for_export(all_data)
     print(f"  ✓ Found {len(all_data)} comments")
     return all_data, post_info
 
