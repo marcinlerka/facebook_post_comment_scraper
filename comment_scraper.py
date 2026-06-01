@@ -100,7 +100,7 @@ def comments_payload(feedback_id, cursor=None, cookies=None):
     }
 
 
-def replies_payload(comment_feedback_id, expansion_token, cookies=None):
+def replies_payload(comment_feedback_id, expansion_token, cookies=None, cursor=None):
     # Extract user ID from cookies if available
     user_id = "0"
     if cookies and "c_user" in cookies:
@@ -117,6 +117,7 @@ def replies_payload(comment_feedback_id, expansion_token, cookies=None):
             "expansionToken": expansion_token,
             "feedLocation": "POST_PERMALINK_DIALOG",
             "focusCommentID": None,
+            "repliesAfterCursor": cursor,
             "scale": 2,
             "useDefaultActor": False,
             "id": comment_feedback_id
@@ -208,7 +209,7 @@ def fetch_comments(feedback_id, cookies=None):
             # Extract reaction count
             reactors = fb.get("reactors", {})
             total_reactions = reactors.get("count_reduced", "0")
-            
+
             results.append({
                 # "comment_id": n["legacy_fbid"],
                 # "author": n["author"]["name"],
@@ -230,39 +231,57 @@ def fetch_comments(feedback_id, cookies=None):
 # ===== FETCH REPLIES =====
 
 def fetch_replies(comment, cookies=None):
-    headers = {**BASE_HEADERS, "x-fb-friendly-name": "Depth1CommentsListPaginationQuery"}
-    r = retry_request(
-        GRAPHQL,
-        headers,
-        replies_payload(comment["_feedback_id"], comment["_expansion_token"], cookies),
-        PROXIES,
-        cookies=cookies
-    )
-
-    j = fb_json(r.text)
     replies = []
+    cursor = None
+    seen_cursors = set()
+    seen_replies = set()
 
-    edges = (
-        j.get("data", {})
-         .get("node", {})
-         .get("replies_connection", {})
-         .get("edges", [])
-    )
+    while True:
+        headers = {**BASE_HEADERS, "x-fb-friendly-name": "Depth1CommentsListPaginationQuery"}
+        r = retry_request(
+            GRAPHQL,
+            headers,
+            replies_payload(comment["_feedback_id"], comment["_expansion_token"], cookies, cursor),
+            PROXIES,
+            cookies=cookies
+        )
 
-    for e in edges:
-        n = e["node"]
-        fb = n.get("feedback", {})
-        
-        # Extract reaction count
-        reactors = fb.get("reactors", {})
-        total_reactions = reactors.get("count_reduced", "0")
-        
-        replies.append({
-            # "reply_id": n["legacy_fbid"],
-            # "author": n["author"]["name"],
-            "text": (n.get("body") or {}).get("text", ""),
-            "reaction_count": total_reactions
-        })
+        j = fb_json(r.text)
+
+        replies_connection = (
+            j.get("data", {})
+             .get("node", {})
+             .get("replies_connection", {})
+        )
+
+        edges = replies_connection.get("edges", [])
+
+        for e in edges:
+            n = e["node"]
+            fb = n.get("feedback", {})
+
+            # Extract reaction count
+            reactors = fb.get("reactors", {})
+            total_reactions = reactors.get("count_reduced", "0")
+
+            reply_text = (n.get("body") or {}).get("text", "")
+            reply_key = n.get("legacy_fbid") or fb.get("id") or reply_text
+            if reply_key in seen_replies:
+                continue
+            seen_replies.add(reply_key)
+
+            replies.append({
+                # "reply_id": n["legacy_fbid"],
+                # "author": n["author"]["name"],
+                "text": reply_text,
+                "reaction_count": total_reactions
+            })
+
+        page_info = replies_connection.get("page_info", {}) or {}
+        cursor = page_info.get("end_cursor")
+        if not page_info.get("has_next_page") or not cursor or cursor in seen_cursors:
+            break
+        seen_cursors.add(cursor)
 
     return replies
 
@@ -300,4 +319,3 @@ if __name__ == "__main__":
         json.dump(output, f, ensure_ascii=False, indent=2)
 
     print(f"💬 Saved to {output_file}")
-
