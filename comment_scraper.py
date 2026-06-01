@@ -321,6 +321,7 @@ def fetch_comments(feedback_id, cookies=None):
         for e in edges:
             n = e["node"]
             fb = n["feedback"]
+            author = n.get("author") or {}
 
             # Extract parent_post_story info from first response
             if response_count == 1 and post_info is None:
@@ -361,8 +362,9 @@ def fetch_comments(feedback_id, cookies=None):
             total_reactions = reactors.get("count_reduced", "0")
 
             results.append({
-                # "comment_id": n["legacy_fbid"],
-                # "author": n["author"]["name"],
+                "comment_id": n.get("legacy_fbid"),
+                "author": author.get("name"),
+                "author_id": author.get("id"),
                 "text": (n.get("body") or {}).get("text", ""),
                 "reaction_count": total_reactions,
                 "_feedback_id": fb["id"],  # Internal use only (for fetching replies)
@@ -409,6 +411,7 @@ def fetch_replies(comment, cookies=None):
         for e in edges:
             n = e["node"]
             fb = n.get("feedback", {})
+            author = n.get("author") or {}
 
             # Extract reaction count
             reactors = fb.get("reactors", {})
@@ -421,8 +424,9 @@ def fetch_replies(comment, cookies=None):
             seen_replies.add(reply_key)
 
             replies.append({
-                # "reply_id": n["legacy_fbid"],
-                # "author": n["author"]["name"],
+                "reply_id": n.get("legacy_fbid"),
+                "author": author.get("name"),
+                "author_id": author.get("id"),
                 "text": reply_text,
                 "reaction_count": total_reactions
             })
