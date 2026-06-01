@@ -1,8 +1,12 @@
 import argparse
+import copy
 import json
 from collections import defaultdict
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
+
+import requests
 
 
 def markdown_escape(value):
@@ -21,6 +25,63 @@ def mention(name):
     if not name:
         return "@Unknown"
     return f"@{markdown_escape(name)}"
+
+
+class MetaDescriptionParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.description = None
+        self.fallback_description = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != "meta":
+            return
+
+        attr_map = {name.lower(): value for name, value in attrs}
+        content = attr_map.get("content")
+        if not content:
+            return
+
+        if attr_map.get("property") == "og:description":
+            self.description = content
+        elif attr_map.get("name") == "description":
+            self.fallback_description = content
+
+
+def fetch_post_text_from_source_url(source_url):
+    response = requests.get(
+        source_url,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept-Language": "pl,en-US;q=0.9,en;q=0.8",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+
+    parser = MetaDescriptionParser()
+    parser.feed(response.text)
+    return parser.description or parser.fallback_description
+
+
+def fill_missing_post_text(data, fetcher=fetch_post_text_from_source_url):
+    post_info = data.setdefault("post_info", {})
+    if (post_info.get("text") or "").strip():
+        return data
+
+    source_url = data.get("source_url")
+    if not source_url:
+        return data
+
+    try:
+        post_text = fetcher(source_url)
+    except requests.RequestException:
+        return data
+
+    if post_text:
+        post_info["text"] = post_text
+
+    return data
 
 
 def numeric_value(value, default=0):
@@ -198,10 +259,13 @@ def render_markdown(data):
     return "\n".join(lines).rstrip() + "\n"
 
 
-def convert_json_to_markdown(input_path, output_path=None):
+def convert_json_to_markdown(input_path, output_path=None, fetch_missing_post_text=True):
     input_path = Path(input_path)
     with input_path.open(encoding="utf-8") as source:
         data = json.load(source)
+
+    if fetch_missing_post_text:
+        data = fill_missing_post_text(copy.deepcopy(data))
 
     markdown = render_markdown(data)
     if output_path is None:
@@ -221,12 +285,21 @@ def parse_args():
         "--output",
         help="Path for the generated Markdown file. Defaults to input path with .md suffix.",
     )
+    parser.add_argument(
+        "--no-fetch-post-text",
+        action="store_true",
+        help="Do not fetch source_url metadata when post_info.text is missing.",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    output_path = convert_json_to_markdown(args.input, args.output)
+    output_path = convert_json_to_markdown(
+        args.input,
+        args.output,
+        fetch_missing_post_text=not args.no_fetch_post_text,
+    )
     print(f"Saved Markdown to {output_path}")
 
 

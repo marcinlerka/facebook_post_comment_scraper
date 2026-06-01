@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from json_to_markdown import render_markdown
+from json_to_markdown import fill_missing_post_text, render_markdown
 
 
 class JsonToMarkdownTests(unittest.TestCase):
@@ -71,6 +71,20 @@ class JsonToMarkdownTests(unittest.TestCase):
         self.assertIn("    - **@Nested Reply** replying to @First Reply", markdown)
         self.assertIn("_24 reactions", markdown)
         self.assertIn("**Author:** @Adam Example", markdown)
+
+    def test_fills_missing_post_text_from_source_url(self):
+        data = {
+            "source_url": "https://example.com/post",
+            "post_info": {
+                "author": "Adam Example",
+                "text": None,
+            },
+            "comments": [],
+        }
+
+        fill_missing_post_text(data, fetcher=lambda url: f"Fetched from {url}")
+
+        self.assertEqual(data["post_info"]["text"], "Fetched from https://example.com/post")
 
 
 if __name__ == "__main__":
