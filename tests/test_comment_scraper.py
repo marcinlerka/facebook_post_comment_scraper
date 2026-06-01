@@ -17,6 +17,7 @@ class FakeResponse:
 def reply_page(text, has_next_page=False, end_cursor=None, reply_id="reply-1", parent=None):
     node = {
         "legacy_fbid": reply_id,
+        "created_time": 1779607551,
         "author": {"name": "Reply Author", "id": "reply-author-id"},
         "body": {"text": text},
         "feedback": {"reactors": {"count_reduced": "0"}},
@@ -86,6 +87,7 @@ class FetchRepliesTests(unittest.TestCase):
                                 {
                                     "node": {
                                         "legacy_fbid": "comment-1",
+                                        "created_time": 1779607551,
                                         "author": {"name": "Comment Author", "id": "comment-author-id"},
                                         "body": {"text": "comment text"},
                                         "feedback": {
@@ -109,6 +111,8 @@ class FetchRepliesTests(unittest.TestCase):
         self.assertEqual(comments[0]["comment_id"], "comment-1")
         self.assertEqual(comments[0]["author"], "Comment Author")
         self.assertEqual(comments[0]["author_id"], "comment-author-id")
+        self.assertEqual(comments[0]["created_time"], 1779607551)
+        self.assertEqual(comments[0]["created_time_iso"], "2026-05-24T07:25:51+00:00")
 
     def test_fetch_replies_includes_author_metadata(self):
         response = FakeResponse(reply_page("reply text", has_next_page=False))
@@ -123,10 +127,12 @@ class FetchRepliesTests(unittest.TestCase):
         self.assertEqual(replies[0]["reply_id"], "reply-1")
         self.assertEqual(replies[0]["author"], "Reply Author")
         self.assertEqual(replies[0]["author_id"], "reply-author-id")
+        self.assertEqual(replies[0]["created_time"], 1779607551)
+        self.assertEqual(replies[0]["created_time_iso"], "2026-05-24T07:25:51+00:00")
 
     def test_fetch_replies_includes_direct_parent_metadata(self):
         parent = {
-            "id": "parent-comment-id",
+            "id": "Y29tbWVudDoyNzYyODI4NTA3MDEwNzAyMl8xNTA0MDU2ODE0NTk1MjA3",
             "author": {
                 "name": "Parent Author",
                 "id": "parent-author-id",
@@ -141,7 +147,11 @@ class FetchRepliesTests(unittest.TestCase):
         with patch.object(comment_scraper, "retry_request", return_value=response):
             replies = comment_scraper.fetch_replies(comment)
 
-        self.assertEqual(replies[0]["parent_comment_id"], "parent-comment-id")
+        self.assertEqual(
+            replies[0]["parent_comment_id"],
+            "Y29tbWVudDoyNzYyODI4NTA3MDEwNzAyMl8xNTA0MDU2ODE0NTk1MjA3",
+        )
+        self.assertEqual(replies[0]["parent_comment_legacy_id"], "1504056814595207")
         self.assertEqual(replies[0]["parent_author"], "Parent Author")
         self.assertEqual(replies[0]["parent_author_id"], "parent-author-id")
 

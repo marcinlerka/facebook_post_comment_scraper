@@ -2,6 +2,8 @@ import requests
 import json
 import time
 import os
+import base64
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -25,6 +27,25 @@ FB_DTSG = ""
 
 if PROXY:
     print(f"Using proxy: {PROXY}")
+
+
+def created_time_iso(created_time):
+    if created_time is None:
+        return None
+    return datetime.fromtimestamp(created_time, timezone.utc).isoformat()
+
+
+def extract_legacy_comment_id(comment_id):
+    if not comment_id:
+        return None
+
+    try:
+        decoded = base64.b64decode(comment_id).decode("utf-8")
+    except Exception:
+        return None
+
+    _, _, legacy_id = decoded.rpartition("_")
+    return legacy_id or None
 
 # ========= RETRY HELPER =========
 def retry_request(url, headers, data, proxies, cookies=None, max_retries=5):
@@ -366,6 +387,8 @@ def fetch_comments(feedback_id, cookies=None):
                 "author": author.get("name"),
                 "author_id": author.get("id"),
                 "text": (n.get("body") or {}).get("text", ""),
+                "created_time": n.get("created_time"),
+                "created_time_iso": created_time_iso(n.get("created_time")),
                 "reaction_count": total_reactions,
                 "_feedback_id": fb["id"],  # Internal use only (for fetching replies)
                 "_expansion_token": fb["expansion_info"]["expansion_token"]  # Internal use only
@@ -430,7 +453,10 @@ def fetch_replies(comment, cookies=None):
                 "author": author.get("name"),
                 "author_id": author.get("id"),
                 "text": reply_text,
+                "created_time": n.get("created_time"),
+                "created_time_iso": created_time_iso(n.get("created_time")),
                 "parent_comment_id": direct_parent.get("id"),
+                "parent_comment_legacy_id": extract_legacy_comment_id(direct_parent.get("id")),
                 "parent_author": direct_parent_author.get("name"),
                 "parent_author_id": direct_parent_author.get("id"),
                 "reaction_count": total_reactions
