@@ -14,20 +14,22 @@ class FakeResponse:
         self.text = json.dumps(payload)
 
 
-def reply_page(text, has_next_page=False, end_cursor=None, reply_id="reply-1"):
+def reply_page(text, has_next_page=False, end_cursor=None, reply_id="reply-1", parent=None):
+    node = {
+        "legacy_fbid": reply_id,
+        "author": {"name": "Reply Author", "id": "reply-author-id"},
+        "body": {"text": text},
+        "feedback": {"reactors": {"count_reduced": "0"}},
+    }
+    if parent:
+        node["comment_direct_parent"] = parent
+
     return {
         "data": {
             "node": {
                 "replies_connection": {
                     "edges": [
-                        {
-                            "node": {
-                                "legacy_fbid": reply_id,
-                                "author": {"name": "Reply Author", "id": "reply-author-id"},
-                                "body": {"text": text},
-                                "feedback": {"reactors": {"count_reduced": "0"}},
-                            }
-                        }
+                        {"node": node}
                     ],
                     "page_info": {
                         "has_next_page": has_next_page,
@@ -109,20 +111,39 @@ class FetchRepliesTests(unittest.TestCase):
         self.assertEqual(comments[0]["author_id"], "comment-author-id")
 
     def test_fetch_replies_includes_author_metadata(self):
-        responses = [
-            FakeResponse(reply_page("reply text", has_next_page=False)),
-        ]
+        response = FakeResponse(reply_page("reply text", has_next_page=False))
         comment = {
             "_feedback_id": "feedback-id",
             "_expansion_token": "expansion-token",
         }
 
-        with patch.object(comment_scraper, "retry_request", return_value=responses[0]):
+        with patch.object(comment_scraper, "retry_request", return_value=response):
             replies = comment_scraper.fetch_replies(comment)
 
         self.assertEqual(replies[0]["reply_id"], "reply-1")
         self.assertEqual(replies[0]["author"], "Reply Author")
         self.assertEqual(replies[0]["author_id"], "reply-author-id")
+
+    def test_fetch_replies_includes_direct_parent_metadata(self):
+        parent = {
+            "id": "parent-comment-id",
+            "author": {
+                "name": "Parent Author",
+                "id": "parent-author-id",
+            },
+        }
+        response = FakeResponse(reply_page("reply text", parent=parent))
+        comment = {
+            "_feedback_id": "feedback-id",
+            "_expansion_token": "expansion-token",
+        }
+
+        with patch.object(comment_scraper, "retry_request", return_value=response):
+            replies = comment_scraper.fetch_replies(comment)
+
+        self.assertEqual(replies[0]["parent_comment_id"], "parent-comment-id")
+        self.assertEqual(replies[0]["parent_author"], "Parent Author")
+        self.assertEqual(replies[0]["parent_author_id"], "parent-author-id")
 
     def test_comments_payload_uses_top_level_comment_cursor(self):
         payload = comment_scraper.comments_payload("feedback-id", cursor="comment-cursor")
